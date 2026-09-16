@@ -1,0 +1,82 @@
+name: LinkedIn Agent
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Run mode
+        type: choice
+        options: [post, growth, identity]
+        default: post
+      live:
+        description: Publish live
+        type: boolean
+        default: false
+  schedule:
+    - cron: '17 8 * * 1,3,5'
+permissions:
+  contents: read
+concurrency:
+  group: linkedin-agent
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+      LINKEDIN_CLIENT_ID: ${{ secrets.LINKEDIN_CLIENT_ID }}
+      LINKEDIN_CLIENT_SECRET: ${{ secrets.LINKEDIN_CLIENT_SECRET }}
+      LINKEDIN_REDIRECT_URI: ${{ vars.LINKEDIN_REDIRECT_URI }}
+      LINKEDIN_VERSION: ${{ vars.LINKEDIN_VERSION || '202609' }}
+      OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
+      STATE_FILE: /tmp/linkedin-state/state.json
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Restore memory
+        uses: actions/cache/restore@v4
+        with:
+          path: /tmp/linkedin-state
+          key: linkedin-state-${{ github.run_id }}
+          restore-keys: linkedin-state-
+      - name: Decide mode
+        id: cfg
+        shell: bash
+        run: |
+          MODE='${{ inputs.mode }}'
+          [ -z "$MODE" ] && MODE=post
+          LIVE='${{ inputs.live }}'
+          [ "${{ github.event_name }}" = schedule ] && LIVE=true
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
+          echo "live=$LIVE" >> "$GITHUB_OUTPUT"
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          test -n "$OPENAI_API_KEY" || { echo 'Missing OPENAI_API_KEY'; exit 1; }
+          if [ '${{ steps.cfg.outputs.live }}' = true ]; then
+            test -n "$LINKEDIN_ACCESS_TOKEN" || { echo 'Missing LINKEDIN_ACCESS_TOKEN'; exit 1; }
+          fi
+      - name: Run post engine
+        if: steps.cfg.outputs.mode == 'post'
+        env:
+          DRY_RUN: ${{ steps.cfg.outputs.live != 'true' }}
+        run: python post.py
+      - name: Run growth queue
+        if: steps.cfg.outputs.mode == 'growth'
+        env:
+          DRY_RUN: ${{ steps.cfg.outputs.live != 'true' }}
+        run: python growth.py
+      - name: Verify LinkedIn identity
+        if: steps.cfg.outputs.mode == 'identity'
+        run: python -c "from linkedin_api import LinkedIn; u=LinkedIn().userinfo(); print('Authenticated LinkedIn member:',u.get('name') or u.get('given_name'),'sub:',u.get('sub'))"
+      - name: Save memory
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /tmp/linkedin-state
+          key: linkedin-state-${{ github.run_id }}
