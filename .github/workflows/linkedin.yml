@@ -12,10 +12,11 @@ on:
         type: boolean
         default: false
   schedule:
-    # GitHub cron is UTC. Three deliberately spaced weekday publishing opportunities.
+    # GitHub cron is UTC. Publishing and growth opportunities are deliberately separated.
     - cron: '17 8 * * 1'
     - cron: '17 12 * * 3'
     - cron: '17 16 * * 5'
+    - cron: '41 10 * * 2,4'
 permissions:
   contents: read
 concurrency:
@@ -30,10 +31,17 @@ jobs:
       LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
       LINKEDIN_CLIENT_ID: ${{ secrets.LINKEDIN_CLIENT_ID }}
       LINKEDIN_CLIENT_SECRET: ${{ secrets.LINKEDIN_CLIENT_SECRET }}
+      LINKEDIN_GROWTH_ACCESS_TOKEN: ${{ secrets.LINKEDIN_GROWTH_ACCESS_TOKEN }}
+      LINKEDIN_GROWTH_CLIENT_ID: ${{ secrets.LINKEDIN_GROWTH_CLIENT_ID }}
+      LINKEDIN_GROWTH_CLIENT_SECRET: ${{ secrets.LINKEDIN_GROWTH_CLIENT_SECRET }}
       LINKEDIN_REDIRECT_URI: ${{ vars.LINKEDIN_REDIRECT_URI }}
       LINKEDIN_VERSION: ${{ vars.LINKEDIN_VERSION || '202609' }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
       LINKEDIN_MEDIA_LIVE: 'true'
+      # Flip this repository variable to true only after Community Management is approved and the growth token is authorised.
+      LINKEDIN_COMMUNITY_LIVE: ${{ vars.LINKEDIN_COMMUNITY_LIVE || 'false' }}
+      GROWTH_MAX_ACTIONS: ${{ vars.GROWTH_MAX_ACTIONS || '5' }}
+      GROWTH_RELATIONSHIP_COOLDOWN_HOURS: ${{ vars.GROWTH_RELATIONSHIP_COOLDOWN_HOURS || '36' }}
       STATE_FILE: /tmp/linkedin-state/state.json
     steps:
       - uses: actions/checkout@v4
@@ -55,7 +63,8 @@ jobs:
         shell: bash
         run: |
           if [ '${{ github.event_name }}' = 'schedule' ]; then
-            MODE=post
+            HOUR='${{ github.event.schedule }}'
+            if [ "$HOUR" = '41 10 * * 2,4' ]; then MODE=growth; else MODE=post; fi
             LIVE=true
           else
             MODE='${{ inputs.mode }}'
@@ -69,8 +78,11 @@ jobs:
         shell: bash
         run: |
           test -n "$LINKEDIN_ACCESS_TOKEN" || { echo 'Missing LINKEDIN_ACCESS_TOKEN'; exit 1; }
-          if [ '${{ steps.cfg.outputs.mode }}' = post ]; then
+          if [ '${{ steps.cfg.outputs.mode }}' = post ] || [ '${{ steps.cfg.outputs.mode }}' = growth ]; then
             test -n "$OPENAI_API_KEY" || { echo 'Missing OPENAI_API_KEY'; exit 1; }
+          fi
+          if [ '${{ steps.cfg.outputs.mode }}' = growth ] && [ "$LINKEDIN_COMMUNITY_LIVE" = true ]; then
+            test -n "$LINKEDIN_GROWTH_ACCESS_TOKEN" || { echo 'Community Management is live but LINKEDIN_GROWTH_ACCESS_TOKEN is missing'; exit 1; }
           fi
       - name: Verify LinkedIn identity
         if: steps.cfg.outputs.mode == 'identity'
@@ -80,7 +92,7 @@ jobs:
         env:
           DRY_RUN: ${{ steps.cfg.outputs.live != 'true' }}
         run: python post.py
-      - name: Run growth queue
+      - name: Run growth engine
         if: steps.cfg.outputs.mode == 'growth'
         env:
           DRY_RUN: ${{ steps.cfg.outputs.live != 'true' }}
