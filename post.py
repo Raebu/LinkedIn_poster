@@ -9,6 +9,7 @@ from linkedin_api import LinkedIn
 from media import render_visual,render_document
 
 DRY=os.getenv("DRY_RUN","true").lower()=="true";MODEL=os.getenv("OPENAI_MODEL","gpt-5-mini")
+MEDIA_LIVE=os.getenv("LINKEDIN_MEDIA_LIVE","false").lower()=="true"
 TOPICS=["AI implementation economics","software architecture and technical debt","automation and human judgement","enterprise adoption friction","technology governance and risk","interoperability and procurement","organisational design and incentives","technology leadership","operational resilience","emerging technology commercialisation","productivity and operational design","market structure and technology"]
 FORMATS={"short_insight":"60-130 words. One sharp observation, mechanism or consequence. Stop when the idea is complete.","standard":"150-300 words. Develop one argument with enough explanation to make it useful, without turning it into an essay.","deep_dive":"400-800 words. White-paper-style depth only when the idea genuinely needs several linked mechanisms, trade-offs or implications. Use readable paragraphs and concrete language; depth must come from reasoning, not padding.","visual":"80-220 words plus a precise visual brief for an original diagram, framework, architecture, chart concept or conceptual graphic that adds information rather than decoration.","document":"100-220 word caption plus a 5-8 page/slide document outline for a framework, technical explanation, comparison or research-led idea. Each page must earn its place.","conversation":"80-220 words. Establish a substantive observation or unresolved problem first, then ask one informed question that invites evidence, mechanisms, implementation detail or a real trade-off. Never engagement bait."}
 def ask(prompt):return OpenAI(api_key=os.environ["OPENAI_API_KEY"]).responses.create(model=MODEL,input=MARTIN_VOICE+"\n\nTASK\n"+prompt).output_text.strip()
@@ -40,12 +41,15 @@ def main():
  asset_bytes=None;alt=""
  if fmt=="visual":asset_bytes,alt=render_visual(visual,topic);print(f"VISUAL_RENDERED: {len(asset_bytes)} bytes\nALT: {alt}")
  elif fmt=="document":asset_bytes=render_document(document,topic);print(f"DOCUMENT_RENDERED: {len(asset_bytes)} bytes, {len(document)} pages")
- print(f"DRY_RUN={DRY}");urn="";asset_urn=""
+ print(f"DRY_RUN={DRY}");urn="";asset_urn="";published=False
  if not DRY:
-  li=LinkedIn()
-  if fmt=="visual":urn,asset_urn=li.create_image_post(text,asset_bytes,alt)
-  elif fmt=="document":urn,asset_urn=li.create_document_post(text,asset_bytes,title=f"{topic.title()} — Martin Raeburn.pdf")
-  else:urn=li.create_post(text)
-  print("PUBLISHED",urn,"ASSET",asset_urn)
- s.setdefault("posts",[]).append({"timestamp":datetime.now(timezone.utc).isoformat(),"text":text,"topic":topic,"format":fmt,"visual_brief":visual,"document_outline":document,"urn":urn,"asset_urn":asset_urn,"dry_run":DRY});s["posts"]=s["posts"][-250:];save_state(s)
+  if fmt in {"visual","document"} and not MEDIA_LIVE:
+   print(f"HELD_FOR_MEDIA_VALIDATION: {fmt} rendered successfully but live media publishing remains disabled")
+  else:
+   li=LinkedIn()
+   if fmt=="visual":urn,asset_urn=li.create_image_post(text,asset_bytes,alt)
+   elif fmt=="document":urn,asset_urn=li.create_document_post(text,asset_bytes,title=f"{topic.title()} — Martin Raeburn.pdf")
+   else:urn=li.create_post(text)
+   published=True;print("PUBLISHED",urn,"ASSET",asset_urn)
+ s.setdefault("posts",[]).append({"timestamp":datetime.now(timezone.utc).isoformat(),"text":text,"topic":topic,"format":fmt,"visual_brief":visual,"document_outline":document,"urn":urn,"asset_urn":asset_urn,"dry_run":DRY,"published":published});s["posts"]=s["posts"][-250:];save_state(s)
 if __name__=="__main__":main()
