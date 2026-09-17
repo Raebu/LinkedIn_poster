@@ -6,13 +6,14 @@ on:
         description: Run mode
         type: choice
         options: [post, growth, identity]
-        default: post
+        default: identity
       live:
         description: Publish live
         type: boolean
         default: false
-  schedule:
-    - cron: '17 8 * * 1,3,5'
+  # Live schedules are intentionally disabled until identity and dry-run validation pass.
+  # schedule:
+  #   - cron: '17 8 * * 1,3,5'
 permissions:
   contents: read
 concurrency:
@@ -49,18 +50,21 @@ jobs:
         shell: bash
         run: |
           MODE='${{ inputs.mode }}'
-          [ -z "$MODE" ] && MODE=post
+          [ -z "$MODE" ] && MODE=identity
           LIVE='${{ inputs.live }}'
-          [ "${{ github.event_name }}" = schedule ] && LIVE=true
+          [ -z "$LIVE" ] && LIVE=false
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "live=$LIVE" >> "$GITHUB_OUTPUT"
       - name: Validate required secrets
         shell: bash
         run: |
-          test -n "$OPENAI_API_KEY" || { echo 'Missing OPENAI_API_KEY'; exit 1; }
-          if [ '${{ steps.cfg.outputs.live }}' = true ]; then
-            test -n "$LINKEDIN_ACCESS_TOKEN" || { echo 'Missing LINKEDIN_ACCESS_TOKEN'; exit 1; }
+          test -n "$LINKEDIN_ACCESS_TOKEN" || { echo 'Missing LINKEDIN_ACCESS_TOKEN'; exit 1; }
+          if [ '${{ steps.cfg.outputs.mode }}' = post ]; then
+            test -n "$OPENAI_API_KEY" || { echo 'Missing OPENAI_API_KEY'; exit 1; }
           fi
+      - name: Verify LinkedIn identity
+        if: steps.cfg.outputs.mode == 'identity'
+        run: python -c "from linkedin_api import LinkedIn; u=LinkedIn().userinfo(); print('Authenticated LinkedIn member:',u.get('name') or u.get('given_name'),'sub:',u.get('sub'))"
       - name: Run post engine
         if: steps.cfg.outputs.mode == 'post'
         env:
@@ -71,9 +75,6 @@ jobs:
         env:
           DRY_RUN: ${{ steps.cfg.outputs.live != 'true' }}
         run: python growth.py
-      - name: Verify LinkedIn identity
-        if: steps.cfg.outputs.mode == 'identity'
-        run: python -c "from linkedin_api import LinkedIn; u=LinkedIn().userinfo(); print('Authenticated LinkedIn member:',u.get('name') or u.get('given_name'),'sub:',u.get('sub'))"
       - name: Save memory
         if: always()
         uses: actions/cache/save@v4
