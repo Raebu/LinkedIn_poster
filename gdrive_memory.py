@@ -1,18 +1,28 @@
-"""LinkedIn durable memory in Martin's shared social-agent Google workbook."""
+"""Shared durable social-agent memory for Martin Raeburn."""
 from __future__ import annotations
 import json,os,time
 from datetime import datetime,timezone
-SHEET_ID=os.getenv("SOCIAL_MEMORY_SHEET_ID") or os.getenv("BSKY_MEMORY_SHEET_ID") or "1yIwJqlmgRbp1_o4MFCLHMSOOgaE3DYMd31eF43dF9bs"
-_CACHE={};_BOOK=None;CACHE_SECONDS=int(os.getenv("GDRIVE_CACHE_SECONDS","300"))
+SHEET_ID=os.getenv("SOCIAL_MEMORY_SHEET_ID") or os.getenv("BSKY_MEMORY_SHEET_ID") or "1yIwJqlmgRbp1_o4MFCLHMSOOgaE3DYMd31eF43dF9bs";_CACHE={};_BOOK=None;CACHE_SECONDS=int(os.getenv("GDRIVE_CACHE_SECONDS","300"))
 TABS={
- "LinkedIn Relationships":["Updated","Key","Name","Profile URL","Organisation","Stage","Interactions","Replies","Topics","Last Interaction"],
- "LinkedIn Interactions":["At","Action","Status","Relationship","URN","Organisation","Topic","Text","Why"],
- "LinkedIn Conversations":["At","Relationship","URN","Direction","Their Text","Martin Reply","Context"],
- "LinkedIn Opportunities":["At","Relationship","URN","Organisation","Source","Status"],
- "LinkedIn Target Accounts":["Added","Name","Profile URL","Organisation","Category","Priority","Notes","Active"],
- "LinkedIn Performance":["At","URN","Relationship","Reactions","Comments","Reshares","Notes"],
- "LinkedIn Agent Runs":["Started","Finished","Mode","Dry Run","Actions","Relationships","Opportunities","Notes"],
- "LinkedIn Weekly Reviews":["At","Review JSON"]}
+"LinkedIn Relationships":["Updated","Key","Name","Profile URL","Organisation","Stage","Objective","Confidence","Interactions","Replies","Topics","Last Interaction","Fresh Until"],
+"LinkedIn Interactions":["At","Action","Status","Relationship","URN","Organisation","Topic","Text","Why","Confidence"],
+"LinkedIn Conversations":["At","Relationship","URN","Direction","Their Text","Martin Reply","Context"],
+"LinkedIn Opportunities":["At","Relationship","URN","Organisation","Source","Stage","Evidence","Next Review"],
+"LinkedIn Target Accounts":["Added","Name","Profile URL","Organisation","Category","Priority","Objective","Notes","Active"],
+"LinkedIn Performance":["At","URN","Relationship","Reactions","Comments","Reshares","Conversation Depth","Relationship Change","Notes"],
+"LinkedIn Agent Runs":["Started","Finished","Mode","Dry Run","Actions","Relationships","Opportunities","Notes"],
+"LinkedIn Weekly Reviews":["At","Review JSON"],
+"Social Identity Map":["Person ID","Canonical Name","LinkedIn","Bluesky","Organisation","Confidence","Evidence","Last Verified"],
+"Social Knowledge Graph":["Updated","Concept","Related Concepts","Evidence","Platforms","Strength","Status"],
+"Social Ideas":["Created","Updated","Idea","Stage","Evidence","Platforms","Last Used","Notes"],
+"Social Sources":["Added","Claim","Source URL","Publisher","Checked","Recheck","Confidence","Status"],
+"Social Audience Learning":["Updated","Audience","Topic","Format","Signal","Evidence","Do Not Optimise Opinion"],
+"Social Negative Learning":["At","Platform","Text","Failure Type","Reason","Correction"],
+"Social Experiments":["Started","Platform","Hypothesis","Variable","Control","Result","Status","Guardrail"],
+"Social Network Health":["At","Platform","Relationships","New Conversations","Recurring Conversations","Topic Diversity","Concentration","Silence Rate","Opportunities"],
+"Social Controls":["Control","Value","Updated","Notes"],
+"Social Executive Digests":["At","Period","Summary"]}
+DEFAULT_CONTROLS=[("Publishing Enabled","TRUE","Global publishing kill switch"),("Growth Enabled","TRUE","Global growth kill switch"),("Comments Enabled","TRUE","Comment execution"),("Reactions Enabled","TRUE","Reaction execution"),("Reshares Enabled","TRUE","Reshare execution")]
 def now():return datetime.now(timezone.utc).isoformat()
 def _client():
  global _BOOK
@@ -29,18 +39,24 @@ def ensure_tabs():
  existing={s.title for s in book.worksheets()}
  for name,headers in TABS.items():
   if name not in existing:
-   ws=book.add_worksheet(title=name,rows=1000,cols=max(12,len(headers)));ws.append_row(headers,value_input_option="RAW")
+   ws=book.add_worksheet(title=name,rows=1000,cols=max(14,len(headers)));ws.append_row(headers,value_input_option="RAW")
+ if not book.worksheet("Social Controls").get_all_records():
+  for c,v,n in DEFAULT_CONTROLS:book.worksheet("Social Controls").append_row([c,v,now(),n],value_input_option="RAW")
 def append(tab,row):
  try:
-  ensure_tabs();book=_client()
-  if book:book.worksheet(tab).append_row(["" if x is None else str(x) for x in row],value_input_option="RAW");_CACHE.pop(tab,None)
+  ensure_tabs();b=_client()
+  if b:b.worksheet(tab).append_row(["" if x is None else str(x) for x in row],value_input_option="RAW");_CACHE.pop(tab,None)
  except Exception as e:print("GDRIVE append failed",tab,e)
 def rows(tab,refresh=False):
  try:
   ts,data=_CACHE.get(tab,(0,None))
   if not refresh and data is not None and time.monotonic()-ts<CACHE_SECONDS:return data
-  ensure_tabs();book=_client();data=book.worksheet(tab).get_all_records() if book else [];_CACHE[tab]=(time.monotonic(),data);return data
+  ensure_tabs();b=_client();data=b.worksheet(tab).get_all_records() if b else [];_CACHE[tab]=(time.monotonic(),data);return data
  except Exception as e:print("GDRIVE read failed",tab,e);return _CACHE.get(tab,(0,[]))[1] or []
+def control(name,default=True):
+ for r in rows("Social Controls"):
+  if str(r.get("Control","")).strip().lower()==name.lower():return str(r.get("Value","")).lower() in {"true","1","yes","on","enabled"}
+ return default
 def shared_do_not_engage():
  out=set()
  for r in rows("Do Not Engage"):
@@ -50,7 +66,9 @@ def shared_do_not_engage():
  return out
 def verified_knowledge():return [str(r.get("Fact","")) for r in rows("Verified Knowledge") if str(r.get("Status","")).upper()=="VERIFIED"]
 def target_accounts():return [r for r in rows("LinkedIn Target Accounts") if str(r.get("Active","true")).lower() not in {"false","0","no","inactive"}]
-def log_interaction(rec):append("LinkedIn Interactions",[rec.get("at"),rec.get("action"),rec.get("status"),rec.get("relationship"),rec.get("urn"),rec.get("organisation"),rec.get("topic"),rec.get("summary",""),rec.get("why","")])
-def log_opportunity(o):append("LinkedIn Opportunities",[o.get("at"),o.get("relationship"),o.get("urn"),o.get("organisation"),o.get("source"),o.get("status","NEW")])
+def log_interaction(r):append("LinkedIn Interactions",[r.get("at"),r.get("action"),r.get("status"),r.get("relationship"),r.get("urn"),r.get("organisation"),r.get("topic"),r.get("summary",""),r.get("why",""),r.get("confidence","")])
+def log_opportunity(o):append("LinkedIn Opportunities",[o.get("at"),o.get("relationship"),o.get("urn"),o.get("organisation"),o.get("source"),o.get("stage","SIGNAL"),o.get("evidence",""),o.get("next_review","")])
 def log_run(started,dry,state,actions,notes=""):append("LinkedIn Agent Runs",[started,now(),"growth",dry,actions,len(state.get("relationships",{})),len(state.get("opportunities",[])),notes])
 def log_review(review):append("LinkedIn Weekly Reviews",[now(),json.dumps(review,ensure_ascii=False)])
+def log_negative(platform,text,kind,reason,correction=""):append("Social Negative Learning",[now(),platform,text,kind,reason,correction])
+def log_digest(period,summary):append("Social Executive Digests",[now(),period,summary])
