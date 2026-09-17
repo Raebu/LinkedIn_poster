@@ -1,6 +1,11 @@
-"""Small official LinkedIn REST client. No scraping or unofficial endpoints."""
+"""Official LinkedIn REST client for publishing and Community Management.
+
+No scraping or unofficial endpoints. Growth credentials are kept separate from the
+publisher so Community Management can be enabled without disturbing live posting.
+"""
 from __future__ import annotations
 import os, requests
+from urllib.parse import quote
 
 API="https://api.linkedin.com"
 VERSION=os.getenv("LINKEDIN_VERSION","202609")
@@ -21,12 +26,13 @@ class LinkedIn:
   return {"author":author or self.person_urn(),"commentary":text,"visibility":visibility,"distribution":{"feedDistribution":"MAIN_FEED","targetEntities":[],"thirdPartyDistributionChannels":[]},"lifecycleState":"PUBLISHED","isReshareDisabledByAuthor":False}
  def create_post(self,text,author=None,visibility="PUBLIC"):
   r=self._request("POST","/rest/posts",json=self._post_body(text,author,visibility));return r.headers.get("x-restli-id","")
+ def get_post(self,urn):
+  return self._request("GET",f"/rest/posts/{quote(urn,safe='')}?viewContext=READER").json()
  def _initialize_upload(self,kind,owner=None):
   owner=owner or self.person_urn();plural="images" if kind=="image" else "documents"
   r=self._request("POST",f"/rest/{plural}?action=initializeUpload",json={"initializeUploadRequest":{"owner":owner}})
   value=r.json()["value"];return value["uploadUrl"],value[kind]
  def _upload_bytes(self,url,data,content_type):
-  # LinkedIn's signed upload URL receives the binary body. Bearer auth is retained as documented for document uploads.
   r=requests.put(url,data=data,headers={"Authorization":f"Bearer {self.token}","Content-Type":content_type},timeout=120)
   if not r.ok:raise RuntimeError(f"LinkedIn media upload {r.status_code}: {r.text[:500]}")
  def upload_image(self,data,content_type="image/png",owner=None):
@@ -42,3 +48,20 @@ class LinkedIn:
  def reshare(self,parent_urn,commentary="",author=None):
   body=self._post_body(commentary,author);body["reshareContext"]={"parent":parent_urn}
   r=self._request("POST","/rest/posts",json=body);return r.headers.get("x-restli-id","")
+ def create_comment(self,target_urn,text,actor=None):
+  """Community Management Comments API; requires w_member_social_feed for member actions."""
+  actor=actor or self.person_urn()
+  body={"actor":actor,"message":{"text":text},"object":target_urn}
+  r=self._request("POST",f"/rest/socialActions/{quote(target_urn,safe='')}/comments",json=body)
+  return r.headers.get("x-restli-id","") or r.json().get("id","")
+ def create_reaction(self,target_urn,reaction_type="LIKE",actor=None):
+  """Community Management Reactions API; requires w_member_social_feed for member actions."""
+  actor=actor or self.person_urn()
+  body={"root":target_urn,"reactionType":reaction_type}
+  r=self._request("POST",f"/rest/reactions?actor={quote(actor,safe='')}",json=body)
+  return r.headers.get("x-restli-id","")
+
+def growth_client():
+ """Use the dedicated Community Management token when present."""
+ token=os.getenv("LINKEDIN_GROWTH_ACCESS_TOKEN") or os.getenv("LINKEDIN_ACCESS_TOKEN")
+ return LinkedIn(token)
