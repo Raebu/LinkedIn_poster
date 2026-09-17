@@ -33,7 +33,7 @@ jobs:
       LINKEDIN_REDIRECT_URI: ${{ vars.LINKEDIN_REDIRECT_URI }}
       LINKEDIN_VERSION: ${{ vars.LINKEDIN_VERSION || '202609' }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
-      LINKEDIN_MEDIA_LIVE: 'false'
+      LINKEDIN_MEDIA_LIVE: 'true'
       STATE_FILE: /tmp/linkedin-state/state.json
     steps:
       - uses: actions/checkout@v4
