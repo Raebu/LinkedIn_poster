@@ -12,7 +12,6 @@ on:
         type: boolean
         default: false
   schedule:
-    # GitHub cron is UTC. Publishing and growth opportunities are deliberately separated.
     - cron: '17 8 * * 1'
     - cron: '17 12 * * 3'
     - cron: '17 16 * * 5'
@@ -34,11 +33,12 @@ jobs:
       LINKEDIN_GROWTH_ACCESS_TOKEN: ${{ secrets.LINKEDIN_GROWTH_ACCESS_TOKEN }}
       LINKEDIN_GROWTH_CLIENT_ID: ${{ secrets.LINKEDIN_GROWTH_CLIENT_ID }}
       LINKEDIN_GROWTH_CLIENT_SECRET: ${{ secrets.LINKEDIN_GROWTH_CLIENT_SECRET }}
+      GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+      SOCIAL_MEMORY_SHEET_ID: ${{ vars.SOCIAL_MEMORY_SHEET_ID || '1yIwJqlmgRbp1_o4MFCLHMSOOgaE3DYMd31eF43dF9bs' }}
       LINKEDIN_REDIRECT_URI: ${{ vars.LINKEDIN_REDIRECT_URI }}
       LINKEDIN_VERSION: ${{ vars.LINKEDIN_VERSION || '202609' }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
       LINKEDIN_MEDIA_LIVE: 'true'
-      # Flip this repository variable to true only after Community Management is approved and the growth token is authorised.
       LINKEDIN_COMMUNITY_LIVE: ${{ vars.LINKEDIN_COMMUNITY_LIVE || 'false' }}
       GROWTH_MAX_ACTIONS: ${{ vars.GROWTH_MAX_ACTIONS || '5' }}
       GROWTH_RELATIONSHIP_COOLDOWN_HOURS: ${{ vars.GROWTH_RELATIONSHIP_COOLDOWN_HOURS || '36' }}
@@ -67,23 +67,19 @@ jobs:
             if [ "$HOUR" = '41 10 * * 2,4' ]; then MODE=growth; else MODE=post; fi
             LIVE=true
           else
-            MODE='${{ inputs.mode }}'
-            [ -z "$MODE" ] && MODE=identity
-            LIVE='${{ inputs.live }}'
-            [ -z "$LIVE" ] && LIVE=false
+            MODE='${{ inputs.mode }}'; [ -z "$MODE" ] && MODE=identity
+            LIVE='${{ inputs.live }}'; [ -z "$LIVE" ] && LIVE=false
           fi
-          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
-          echo "live=$LIVE" >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"; echo "live=$LIVE" >> "$GITHUB_OUTPUT"
       - name: Validate required secrets
         shell: bash
         run: |
           test -n "$LINKEDIN_ACCESS_TOKEN" || { echo 'Missing LINKEDIN_ACCESS_TOKEN'; exit 1; }
-          if [ '${{ steps.cfg.outputs.mode }}' = post ] || [ '${{ steps.cfg.outputs.mode }}' = growth ]; then
-            test -n "$OPENAI_API_KEY" || { echo 'Missing OPENAI_API_KEY'; exit 1; }
-          fi
-          if [ '${{ steps.cfg.outputs.mode }}' = growth ] && [ "$LINKEDIN_COMMUNITY_LIVE" = true ]; then
-            test -n "$LINKEDIN_GROWTH_ACCESS_TOKEN" || { echo 'Community Management is live but LINKEDIN_GROWTH_ACCESS_TOKEN is missing'; exit 1; }
-          fi
+          if [ '${{ steps.cfg.outputs.mode }}' = post ] || [ '${{ steps.cfg.outputs.mode }}' = growth ]; then test -n "$OPENAI_API_KEY" || { echo 'Missing OPENAI_API_KEY'; exit 1; }; fi
+          if [ '${{ steps.cfg.outputs.mode }}' = growth ] && [ "$LINKEDIN_COMMUNITY_LIVE" = true ]; then test -n "$LINKEDIN_GROWTH_ACCESS_TOKEN" || { echo 'Community Management is live but growth token is missing'; exit 1; }; fi
+      - name: Initialise Google Sheets memory
+        if: steps.cfg.outputs.mode == 'growth'
+        run: python -c "import gdrive_memory as g; g.ensure_tabs(); print('Google Sheets memory:', 'enabled' if g.enabled() else 'fallback cache only')"
       - name: Verify LinkedIn identity
         if: steps.cfg.outputs.mode == 'identity'
         run: python -c "from linkedin_api import LinkedIn; u=LinkedIn().userinfo(); print('Authenticated LinkedIn member:',u.get('name') or u.get('given_name'),'sub:',u.get('sub'))"
