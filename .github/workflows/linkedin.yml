@@ -11,7 +11,11 @@ on:
         description: Publish live
         type: boolean
         default: false
-  # Live schedules are intentionally disabled until dry-run validation is complete.
+  schedule:
+    # GitHub cron is UTC. Three deliberately spaced weekday publishing opportunities.
+    - cron: '17 8 * * 1'
+    - cron: '17 12 * * 3'
+    - cron: '17 16 * * 5'
 permissions:
   contents: read
 concurrency:
@@ -29,6 +33,7 @@ jobs:
       LINKEDIN_REDIRECT_URI: ${{ vars.LINKEDIN_REDIRECT_URI }}
       LINKEDIN_VERSION: ${{ vars.LINKEDIN_VERSION || '202609' }}
       OPENAI_MODEL: ${{ vars.OPENAI_MODEL || 'gpt-5-mini' }}
+      LINKEDIN_MEDIA_LIVE: 'false'
       STATE_FILE: /tmp/linkedin-state/state.json
     steps:
       - uses: actions/checkout@v4
@@ -49,10 +54,15 @@ jobs:
         id: cfg
         shell: bash
         run: |
-          MODE='${{ inputs.mode }}'
-          [ -z "$MODE" ] && MODE=identity
-          LIVE='${{ inputs.live }}'
-          [ -z "$LIVE" ] && LIVE=false
+          if [ '${{ github.event_name }}' = 'schedule' ]; then
+            MODE=post
+            LIVE=true
+          else
+            MODE='${{ inputs.mode }}'
+            [ -z "$MODE" ] && MODE=identity
+            LIVE='${{ inputs.live }}'
+            [ -z "$LIVE" ] && LIVE=false
+          fi
           echo "mode=$MODE" >> "$GITHUB_OUTPUT"
           echo "live=$LIVE" >> "$GITHUB_OUTPUT"
       - name: Validate required secrets
